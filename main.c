@@ -13,15 +13,25 @@
 #define CW 0x0E //backward direction of belt
 #define CCW 0x0D //forward direction of belt
 
+// define global variables for stepper motor
+#define STEP1 0b00110000
+#define STEP2 0b00000110
+#define STEP3 0b00101000
+#define STEP4 0b00000101
+#define STEPPER_CW 1
+#define STEPPER_CCW 0
+
+//define buckets
+#define BLACK_BKT 0
+#define STEEL_BKT 1
+#define WHITE_BKT 2
+#define ALUM_BKT 3
+
 volatile unsigned char ADC_result;
 volatile unsigned int ADC_result_flag;
 volatile unsigned int killflag =0;
-volatile unsigned int currBucket = 0;
 
-int step1 = 0b00110000;
-int step2 = 0b00000110;
-int step3 = 0b00101000;
-int step4 = 0b00000101;
+volatile unsigned int currBucket = BLACK_BKT;
 
 void PWM();
 void mTimer(int count); /* included from previous labs */
@@ -86,11 +96,13 @@ void main(int argc,char*argv[])
 		PORTA = 0b00000000;
 		mTimer(1);
 		
+		mTimer(5000);
+		bucket(1);
 		bucket(3);
-		bucket(0);
 		bucket(1);
 		bucket(2);
 		bucket(0);
+		bucket(2);
 		bucket(3);
 		bucket(0);
 
@@ -166,56 +178,62 @@ ISR(ADC_vect) {
 }
 void turn(int numSteps, int dir)
 {
-	int accelSteps = numSteps / 4;      // Number of steps for acceleration
-	int steadySteps = numSteps / 2;     // Number of steps at constant speed
-	int decelSteps = numSteps / 4;      // Number of steps for deceleration
+	int accelSteps = 7;      // Number of steps for acceleration
+	int decelSteps = 7;      // Number of steps for deceleration
+	int steadySteps = numSteps - 14;     // Number of steps at constant speed
 
 	int minDelay = 5;                   // Minimum delay for maximum speed
 	int maxDelay = 20;                  // Starting delay (for slowest speed)
 	int delay = maxDelay;               // Initial delay for acceleration
 
-	//dir = 0 is ccw, dir = 1 is cw
-	if (dir == 1) {
-		for (int i = 0; i < numSteps; i++) {
+	if (dir == STEPPER_CW) {
+		for (int i = 1; i < (numSteps+1); i++) { //i = number of steps taken
 			// Set the port values for each step
-			if (PORTA == step1) {
-				PORTA = step2;
+			if (PORTA == STEP1) {
+				PORTA = STEP2;
 			}
-			else if (PORTA == step2) {
-				PORTA = step3;
+			else if (PORTA == STEP2) {
+				PORTA = STEP3;
 			}
-			else if (PORTA == step3) {
-				PORTA = step4;
+			else if (PORTA == STEP3) {
+				PORTA = STEP4;
 			}
 			else {
-				PORTA = step1;
+				PORTA = STEP1;
 			}
 
 			mTimer(delay);  // Wait for the current delay
 
-			// Adjust delay for acceleration, steady, and deceleration phases
+			// Adjust delay for acceleration
 			if (i < accelSteps) {
 				delay -= (maxDelay - minDelay) / accelSteps;  // Accelerate by reducing delay
-				if (delay < minDelay) delay = minDelay;       // Cap at minimum delay
-				} else if (i >= accelSteps + steadySteps) {
+				
+				if (delay < minDelay) {
+					delay = minDelay;       // Cap at minimum delay
+				}
+			} else if (i >= accelSteps + steadySteps) { //start decelerating now
 				delay += (maxDelay - minDelay) / decelSteps;  // Decelerate by increasing delay
-				if (delay > maxDelay) delay = maxDelay;       // Cap at maximum delay
+				
+				if (delay > maxDelay) {
+					delay = maxDelay; // Cap at maximum delay
+				}      
 			}
 		}
-		} else if (dir == 0) { // Counter-clockwise movement
-		for (int i = 0; i < numSteps; i++) {
+	} 
+	else if (dir == STEPPER_CCW) { // Counter-clockwise movement
+		for (int i = 1; i < (numSteps); i++) {
 			// Set the port values for each step in reverse
-			if (PORTA == step1) {
-				PORTA = step4;
+			if (PORTA == STEP1) {
+				PORTA = STEP4;
 			}
-			else if (PORTA == step4) {
-				PORTA = step3;
+			else if (PORTA == STEP4) {
+				PORTA = STEP3;
 			}
-			else if (PORTA == step3) {
-				PORTA = step2;
+			else if (PORTA == STEP3) {
+				PORTA = STEP2;
 			}
 			else {
-				PORTA = step1;
+				PORTA = STEP1;
 			}
 
 			mTimer(delay);  // Wait for the current delay
@@ -223,61 +241,20 @@ void turn(int numSteps, int dir)
 			// Adjust delay for acceleration, steady, and deceleration phases
 			if (i < accelSteps) {
 				delay -= (maxDelay - minDelay) / accelSteps;
-				if (delay < minDelay) delay = minDelay;
-				} else if (i >= accelSteps + steadySteps) {
+				if (delay < minDelay) {
+					delay = minDelay;
+				}
+			} 
+			else if (i >= accelSteps + steadySteps) {
 				delay += (maxDelay - minDelay) / decelSteps;
-				if (delay > maxDelay) delay = maxDelay;
+				if (delay > maxDelay) {
+					delay = maxDelay;
+				}
 			}
 		}
 	}
 	mTimer(2000); // Pause briefly after each full movement
 }
-/*void turn(int numSteps, int dir)
-{
-	//dir = 0 is ccw
-	//dir = 1 is cw
-	if (dir == 1) {
-		for (int i = 0; i < numSteps; i++) {
-			if (PORTA == step1) {
-				PORTA= step2;
-				mTimer(20);
-			}
-			else if (PORTA == step2) {
-				PORTA= step3;
-				mTimer(20);
-			}
-			else if (PORTA == step3) {
-				PORTA= step4;
-				mTimer(20);
-			}
-			else {
-				PORTA= step1;
-				mTimer(20);
-			}
-		}
-	}
-	else if (dir == 0) {
-		for (int i = 0; i < numSteps; i++) {
-			if (PORTA == step1) {
-				PORTA= step4;
-				mTimer(20);
-			}
-			else if (PORTA == step2) {
-				PORTA= step1;
-				mTimer(20);
-			}
-			else if (PORTA == step3) {
-				PORTA= step2;
-				mTimer(20);
-			}
-			else {
-				PORTA= step3;
-				mTimer(20);
-			}
-		}
-	}
-	mTimer(2000);
-} */
 
 void mTimer (int count) {
 /* The system clock is 8MHz. You can actually see the crystal oscillator(16MHz) which is the silver looking can on the board.
@@ -339,73 +316,61 @@ void PWM () {
 	DDRB |= _BV(PB7); //send PWM signal to PB7
 }
 void bucket(int nextBucket){
-//steper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
-if (currBucket==0)
-{
-	if (nextBucket==1)
-	{
-		turn(50,1);//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==3)
-	{
-		turn(50,0);//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==2)
-	{
-		turn(100,1);//turn 180 degrees cw
-		currBucket=nextBucket;
+	//stepper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
+	if (currBucket==BLACK_BKT) {
+		if (nextBucket==STEEL_BKT) {
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==ALUM_BKT) {
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==WHITE_BKT) {
+			turn(100,1);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==1)
-{
-	if (nextBucket==2)
-	{
-		turn(50,1); //turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==0)
-	{
-		turn(50,0); //turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==3)
-	{
-		turn(100,1); //turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==STEEL_BKT) {
+		if (nextBucket==WHITE_BKT) {
+			turn(50,STEPPER_CCW); //turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==BLACK_BKT) {
+			turn(50,STEPPER_CW); //turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==ALUM_BKT) {
+			turn(100,STEPPER_CW); //turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==2)
-{
-	if (nextBucket==3)
-	{
-		turn(50,1);//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==1)
-	{
-		turn(50,0);//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==0)
-	{
-		turn(100,1);//turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==WHITE_BKT) {
+		if (nextBucket==ALUM_BKT) {
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==STEEL_BKT) {
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==BLACK_BKT) {
+			turn(100,STEPPER_CW);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==3)
-{
-	if (nextBucket==0)
-	{
-		turn(50,1);//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==2)
-	{
-		turn(50,0);//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==1)
-	{
-		turn(100,1);//turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==ALUM_BKT) {
+		if (nextBucket==BLACK_BKT) {
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==WHITE_BKT) {
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==STEEL_BKT) {
+			turn(100,STEPPER_CW);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-	}
+}//end bucket
