@@ -15,6 +15,7 @@
 
 volatile unsigned char ADC_result;
 volatile unsigned int ADC_result_flag;
+volatile unsigned int killflag =0;
 volatile unsigned int currBucket = 0;
 
 int step1 = 0b00110000;
@@ -67,6 +68,7 @@ void main(int argc,char*argv[])
 	ADMUX |= _BV(ADLAR) | _BV(REFS0); // Result is stored in left-adjusted register (ADLAR = 1) and
 	//select voltage reference selection 01 (REFS0 = 1): AVCC (analog voltage)
 	//with external capacitor at AREF pin (reference pin for ADC : PB7)
+	
 	// sets the Global Enable for all interrupts ==========================
 	sei(); 
 	// initialize the ADC, start one conversion at the beginning ==========
@@ -78,10 +80,12 @@ void main(int argc,char*argv[])
 		PORTB: EA= PB3 EB = PL2(43) IA= PB1(44) IB = PB0(45)
 		EA and EB = 1 always
 		*/
+	
 		PORTA = 0b11000000;
 		mTimer(1);
 		PORTA = 0b00000000;
 		mTimer(1);
+		
 		bucket(3);
 		bucket(0);
 		bucket(1);
@@ -90,7 +94,13 @@ void main(int argc,char*argv[])
 		bucket(3);
 		bucket(0);
 
-		if (ADC_result_flag) {
+		if (killflag=1)
+		{
+			cli();
+			LCDClear()
+			LCDWriteStringXY(0,1,"PRGRM KILL");
+			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
+		}else if (ADC_result_flag) {
 			OCR0A = ADC_result; // set output compare register to ADC value
 			ADC_result_flag = 0; // clear flag
 			
@@ -109,12 +119,10 @@ ISR(INT3_vect) {
 
 	mTimer(20);
 	
-	LCDWriteStringXY(0,1,"PRGRM KILL");
 	
-	PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
-	cli(); // disable all interrupts
+	killflag=1; // disable all interrupts
 	
-	while((PIND3&0x08) == 0x00){}
+	while((PIND&0x08) == 0x00){}
 	mTimer(20); //Debounce*/
 
 }//end ISR3*/
@@ -128,7 +136,7 @@ ISR(INT2_vect) {
 
 	mTimer(20); //Debounce*/
 	
-	if((PIND2&0x04) == 0x00){
+	if((PIND&0x04) == 0x00){
 		if (PORTB == CW || PORTB == BRAKE) {
 			//brake
 			PORTB = BRAKE;
@@ -146,7 +154,7 @@ ISR(INT2_vect) {
 			//switch to reverse motoring state
 			PORTB = CW;
 		}
-		while((PIND2&0x04) == 0x04){}
+		while((PIND&0x04) == 0x04){}
 		mTimer(20); //Debounce*/
 	}
 }
