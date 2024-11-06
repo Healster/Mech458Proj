@@ -15,6 +15,7 @@
 
 volatile unsigned char ADC_result;
 volatile unsigned int ADC_result_flag;
+volatile unsigned int killflag =0;
 volatile unsigned int currBucket = 0;
 
 int step1 = 0b00110000;
@@ -67,6 +68,7 @@ void main(int argc,char*argv[])
 	ADMUX |= _BV(ADLAR) | _BV(REFS0); // Result is stored in left-adjusted register (ADLAR = 1) and
 	//select voltage reference selection 01 (REFS0 = 1): AVCC (analog voltage)
 	//with external capacitor at AREF pin (reference pin for ADC : PB7)
+	
 	// sets the Global Enable for all interrupts ==========================
 	sei(); 
 	// initialize the ADC, start one conversion at the beginning ==========
@@ -78,10 +80,12 @@ void main(int argc,char*argv[])
 		PORTB: EA= PB3 EB = PL2(43) IA= PB1(44) IB = PB0(45)
 		EA and EB = 1 always
 		*/
+	
 		PORTA = 0b11000000;
 		mTimer(1);
 		PORTA = 0b00000000;
 		mTimer(1);
+		
 		bucket(3);
 		bucket(0);
 		bucket(1);
@@ -90,7 +94,13 @@ void main(int argc,char*argv[])
 		bucket(3);
 		bucket(0);
 
-		if (ADC_result_flag) {
+		if (killflag=1)
+		{
+			cli();
+			LCDClear();
+			LCDWriteStringXY(0,1,"PRGRM KILL");
+			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
+		}else if (ADC_result_flag) {
 			OCR0A = ADC_result; // set output compare register to ADC value
 			ADC_result_flag = 0; // clear flag
 			
@@ -109,12 +119,10 @@ ISR(INT3_vect) {
 
 	mTimer(20);
 	
-	LCDWriteStringXY(0,1,"PRGRM KILL");
 	
-	PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
-	cli(); // disable all interrupts
+	killflag=1; // disable all interrupts
 	
-	while((PIND3&0x08) == 0x00){}
+	while((PIND&0x08) == 0x00){}
 	mTimer(20); //Debounce*/
 
 }//end ISR3*/
@@ -128,7 +136,7 @@ ISR(INT2_vect) {
 
 	mTimer(20); //Debounce*/
 	
-	if((PIND2&0x04) == 0x00){
+	if((PIND&0x04) == 0x00){
 		if (PORTB == CW || PORTB == BRAKE) {
 			//brake
 			PORTB = BRAKE;
@@ -146,7 +154,7 @@ ISR(INT2_vect) {
 			//switch to reverse motoring state
 			PORTB = CW;
 		}
-		while((PIND2&0x04) == 0x04){}
+		while((PIND&0x04) == 0x04){}
 		mTimer(20); //Debounce*/
 	}
 }
@@ -157,6 +165,74 @@ ISR(ADC_vect) {
 	ADC_result_flag = 1;
 }
 void turn(int numSteps, int dir)
+{
+	int accelSteps = numSteps / 4;      // Number of steps for acceleration
+	int steadySteps = numSteps / 2;     // Number of steps at constant speed
+	int decelSteps = numSteps / 4;      // Number of steps for deceleration
+
+	int minDelay = 5;                   // Minimum delay for maximum speed
+	int maxDelay = 20;                  // Starting delay (for slowest speed)
+	int delay = maxDelay;               // Initial delay for acceleration
+
+	//dir = 0 is ccw, dir = 1 is cw
+	if (dir == 1) {
+		for (int i = 0; i < numSteps; i++) {
+			// Set the port values for each step
+			if (PORTA == step1) {
+				PORTA = step2;
+			}
+			else if (PORTA == step2) {
+				PORTA = step3;
+			}
+			else if (PORTA == step3) {
+				PORTA = step4;
+			}
+			else {
+				PORTA = step1;
+			}
+
+			mTimer(delay);  // Wait for the current delay
+
+			// Adjust delay for acceleration, steady, and deceleration phases
+			if (i < accelSteps) {
+				delay -= (maxDelay - minDelay) / accelSteps;  // Accelerate by reducing delay
+				if (delay < minDelay) delay = minDelay;       // Cap at minimum delay
+				} else if (i >= accelSteps + steadySteps) {
+				delay += (maxDelay - minDelay) / decelSteps;  // Decelerate by increasing delay
+				if (delay > maxDelay) delay = maxDelay;       // Cap at maximum delay
+			}
+		}
+		} else if (dir == 0) { // Counter-clockwise movement
+		for (int i = 0; i < numSteps; i++) {
+			// Set the port values for each step in reverse
+			if (PORTA == step1) {
+				PORTA = step4;
+			}
+			else if (PORTA == step4) {
+				PORTA = step3;
+			}
+			else if (PORTA == step3) {
+				PORTA = step2;
+			}
+			else {
+				PORTA = step1;
+			}
+
+			mTimer(delay);  // Wait for the current delay
+
+			// Adjust delay for acceleration, steady, and deceleration phases
+			if (i < accelSteps) {
+				delay -= (maxDelay - minDelay) / accelSteps;
+				if (delay < minDelay) delay = minDelay;
+				} else if (i >= accelSteps + steadySteps) {
+				delay += (maxDelay - minDelay) / decelSteps;
+				if (delay > maxDelay) delay = maxDelay;
+			}
+		}
+	}
+	mTimer(2000); // Pause briefly after each full movement
+}
+/*void turn(int numSteps, int dir)
 {
 	//dir = 0 is ccw
 	//dir = 1 is cw
@@ -201,7 +277,7 @@ void turn(int numSteps, int dir)
 		}
 	}
 	mTimer(2000);
-}
+} */
 
 void mTimer (int count) {
 /* The system clock is 8MHz. You can actually see the crystal oscillator(16MHz) which is the silver looking can on the board.
@@ -268,15 +344,15 @@ if (currBucket==0)
 {
 	if (nextBucket==1)
 	{
-		turn(50,1)//turn 90 degrees cw
+		turn(50,1);//turn 90 degrees cw
 		currBucket=nextBucket;
 	}else if (nextBucket==3)
 	{
-		turn(50,0)//turn 90 degrees ccw
+		turn(50,0);//turn 90 degrees ccw
 		currBucket=nextBucket;
 	}else if (nextBucket==2)
 	{
-		turn(100,1)//turn 180 degrees cw
+		turn(100,1);//turn 180 degrees cw
 		currBucket=nextBucket;
 	}
 	
@@ -285,15 +361,15 @@ if (currBucket==1)
 {
 	if (nextBucket==2)
 	{
-		turn(50,1) //turn 90 degrees cw
+		turn(50,1); //turn 90 degrees cw
 		currBucket=nextBucket;
 	}else if (nextBucket==0)
 	{
-		turn(50,0) //turn 90 degrees ccw
+		turn(50,0); //turn 90 degrees ccw
 		currBucket=nextBucket;
 	}else if (nextBucket==3)
 	{
-		turn(100,1) //turn 180 degrees cw
+		turn(100,1); //turn 180 degrees cw
 		currBucket=nextBucket;
 	}
 	
@@ -302,15 +378,15 @@ if (currBucket==2)
 {
 	if (nextBucket==3)
 	{
-		turn(50,1)//turn 90 degrees cw
+		turn(50,1);//turn 90 degrees cw
 		currBucket=nextBucket;
 	}else if (nextBucket==1)
 	{
-		turn(50,0)//turn 90 degrees ccw
+		turn(50,0);//turn 90 degrees ccw
 		currBucket=nextBucket;
 	}else if (nextBucket==0)
 	{
-		turn(100,1)//turn 180 degrees cw
+		turn(100,1);//turn 180 degrees cw
 		currBucket=nextBucket;
 	}
 	
@@ -319,15 +395,15 @@ if (currBucket==3)
 {
 	if (nextBucket==0)
 	{
-		turn(50,1)//turn 90 degrees cw
+		turn(50,1);//turn 90 degrees cw
 		currBucket=nextBucket;
 	}else if (nextBucket==2)
 	{
-		turn(50,0)//turn 90 degrees ccw
+		turn(50,0);//turn 90 degrees ccw
 		currBucket=nextBucket;
 	}else if (nextBucket==1)
 	{
-		turn(100,1)//turn 180 degrees cw
+		turn(100,1);//turn 180 degrees cw
 		currBucket=nextBucket;
 	}
 	
