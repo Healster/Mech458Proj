@@ -28,10 +28,13 @@
 #define ALUM_BKT 3
 
 volatile unsigned char ADC_result;
+volatile unsigned char ADCH_result;
+volatile unsigned char ADCL_result;
 volatile unsigned int ADC_result_flag;
 volatile unsigned int killflag =0;
 
 volatile unsigned int currBucket = BLACK_BKT;
+//volatile unsigned int stepperDir;
 
 void PWM();
 void mTimer(int count); /* included from previous labs */
@@ -113,7 +116,7 @@ void main(int argc,char*argv[])
 			LCDWriteStringXY(0,1,"PRGRM KILL");
 			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
 		}else if (ADC_result_flag) {
-			OCR0A = ADC_result; // set output compare register to ADC value
+			//OCR0A = ADCH_result+ ADCL_result_flag; // set output compare register to ADC value
 			ADC_result_flag = 0; // clear flag
 			
 			LCDClear();
@@ -173,7 +176,9 @@ ISR(INT2_vect) {
 
 // the interrupt will be triggered if the ADC is done ========================
 ISR(ADC_vect) {
-	ADC_result = ADCH;//use ADCH when using 8 bit ADC
+	ADCL_result=ADCL; // Read ADCL first
+	ADCH_result = ADCH;//Read ADCH second
+	ADC_result = ADCL_result + ADCH_result;
 	ADC_result_flag = 1;
 }
 void turn(int numSteps, int dir)
@@ -319,15 +324,17 @@ void bucket(int nextBucket){
 	//stepper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
 	if (currBucket==BLACK_BKT) {
 		if (nextBucket==STEEL_BKT) {
+			stepperDir = STEPPER_CCW;
 			turn(50,STEPPER_CCW);//turn 90 degrees ccw
 			currBucket=nextBucket;
 		}
 		else if (nextBucket==ALUM_BKT) {
+			stepperDir = STEPPER_CW;
 			turn(50,STEPPER_CW);//turn 90 degrees cw
 			currBucket=nextBucket;
 		}
 		else if (nextBucket==WHITE_BKT) {
-			turn(100,1);//turn 180 degrees cw
+			turn(100,STEPPER_CW);//turn 180 degrees cw
 			currBucket=nextBucket;
 		}
 	}
