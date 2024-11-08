@@ -1,7 +1,7 @@
 /*
  * ProjectEM.c
  *
- * Created: 2024-11-05 2:50:00 PM
+ * Created: 2024-11-08 10:05:00 AM
  * Author : mech458
  */
 #include <avr/interrupt.h>
@@ -13,14 +13,32 @@
 #define CW 0x0E //backward direction of belt
 #define CCW 0x0D //forward direction of belt
 
-volatile unsigned char ADC_result;
-volatile unsigned int ADC_result_flag;
-volatile unsigned int currBucket = 0;
+// define global variables for stepper motor
+#define STEP1 0b00110000
+#define STEP2 0b00000110
+#define STEP3 0b00101000
+#define STEP4 0b00000101
+#define STEPPER_CW 1
+#define STEPPER_CCW 0
 
-int step1 = 0b00110000;
-int step2 = 0b00000110;
-int step3 = 0b00101000;
-int step4 = 0b00000101;
+//define buckets
+#define BLACK_BKT 0
+#define STEEL_BKT 1
+#define WHITE_BKT 2
+#define ALUM_BKT 3
+
+volatile unsigned short ADC_result;
+volatile unsigned short ADC_result_old;
+volatile unsigned char ADCH_result;
+volatile unsigned char ADCL_result;
+volatile unsigned int ADC_result_flag;
+
+volatile unsigned int killflag = 0;
+
+volatile unsigned int gate_detect = 0;
+
+volatile unsigned int currBucket = BLACK_BKT;
+//volatile unsigned int stepperDir;
 
 void PWM();
 void mTimer(int count); /* included from previous labs */
@@ -53,20 +71,28 @@ void main(int argc,char*argv[])
 	
 	PORTB = BRAKE; // init to brake
 
-	// config the external interrupt on PD2 and PD3 ======================================
+	// config the external interrupts ======================================
+	//END OF TRAVEL SENSOR PD1:
+	EICRA |= _BV(ISC11); // falling edge interrupt
+	EIMSK |= (_BV(INT1)); //enable INT1
+	
+	//OR SENSOR TRIGGER PD2:
 	EICRA |= (_BV(ISC21) | _BV(ISC20)); // rising edge interrupt
 	EIMSK |= (_BV(INT2)); // enable INT2
 	
+	//KILL SWITCH INTERRUPT PD3:
 	EICRA |= _BV(ISC31); // falling edge interrupt
 	EIMSK |= (_BV(INT3)); //enable INT3
 
 	// config ADC =========================================================
 	// by default, the ADC input (analog input is set to be ADC0 / PORTF0
 	ADCSRA |= _BV(ADEN);// enableADC
-	ADCSRA |= _BV(ADIE);// enable interrupt of ADC
-	ADMUX |= _BV(ADLAR) | _BV(REFS0); // Result is stored in left-adjusted register (ADLAR = 1) and
+	ADCSRA |= _BV(ADIE);// enable interrupt of ADC -> for RL sensor
+	ADMUX |= _BV(REFS0); 
+	//ADMUX |= _BV(ADLAR); // Result is stored in left-adjusted register (ADLAR = 1) and
 	//select voltage reference selection 01 (REFS0 = 1): AVCC (analog voltage)
 	//with external capacitor at AREF pin (reference pin for ADC : PB7)
+	
 	// sets the Global Enable for all interrupts ==========================
 	sei(); 
 	// initialize the ADC, start one conversion at the beginning ==========
@@ -74,133 +100,171 @@ void main(int argc,char*argv[])
 
 	while (1)
 	{
-		/* motor pseudo code
-		PORTB: EA= PB3 EB = PL2(43) IA= PB1(44) IB = PB0(45)
-		EA and EB = 1 always
-		*/
-		PORTA = 0b11000000;
+		//PORTL = 0x00;
+		/*PORTA = 0b11000000;
 		mTimer(1);
 		PORTA = 0b00000000;
 		mTimer(1);
+		
+		mTimer(5000);
+		bucket(1);
 		bucket(3);
-		bucket(0);
 		bucket(1);
 		bucket(2);
 		bucket(0);
+		bucket(2);
 		bucket(3);
-		bucket(0);
+		bucket(0);*/
 
-		if (ADC_result_flag) {
-			OCR0A = ADC_result; // set output compare register to ADC value
-			ADC_result_flag = 0; // clear flag
-			
+		if (killflag == 1) {
+			cli();
 			LCDClear();
-			LCDWriteInt(ADC_result, 3); //print adc result to LCD
-			mTimer(150);
-			ADCSRA |= _BV(ADSC); // start another conversion
+			LCDWriteStringXY(0,1,"PRGRM KILL");
+			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
+		}
+		else if (ADC_result_flag) {
+			//laser has been blocked by something - value stored in ADC_result
+			ADC_result_flag = 0; // clear ADC flag
+			if (ADC_result < 0b1110000100) {
+				PORTL = 0xF0;
+			}
+			LCDClear();
+			//here do stuff with adc result: determine item type
+			if (ADC_result_old < ADC_result) {
+				//we have lowest value of ADC reading in ADC_result_old
+				//classify item and input into FIFO
+			}
+			
+			//ADCSRA |= _BV(ADSC);
+			ADC_result_old = ADC_result;//store current ADC result to check with next one
+		}
+		else if (gate_detect) {
+			gate_detect = 0; //clear flag
+			//stop DC motor
+			//turn to correct bin - output of FIFO
+			//continue - this will drop item into bin
 		}
 	}
 	return;
 } //end main
 
-//kill button
+//kill button -> switch to pause button later
 
 ISR(INT3_vect) {
 
 	mTimer(20);
 	
-	LCDWriteStringXY(0,1,"PRGRM KILL");
+	killflag=1; // disable all interrupts
 	
-	PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
-	cli(); // disable all interrupts
-	
-	while((PIND3&0x08) == 0x00){}
-	mTimer(20); //Debounce*/
+	while((PIND&0x08) == 0x00){}
+	mTimer(20); //Debounce
 
-}//end ISR3*/
+}//end ISR3
 
 //sensor switch: Active HIGH starts AD converstion =======
 ISR(INT2_vect) {
 	// when there is a rising edge, we need to do ADC =====================
-	//ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
-
-	//LCDWriteString("int2"); //check if isr is triggering on button press
-
-	mTimer(20); //Debounce*/
-	
-	if((PIND2&0x04) == 0x00){
-		if (PORTB == CW || PORTB == BRAKE) {
-			//brake
-			PORTB = BRAKE;
-			//wait 5ms for motor slow down
-			mTimer(5);
-			//switch to reverse motoring state
-			PORTB = CCW;
-		}
-		else if(PORTB == CCW) {
-
-			//brake
-			PORTB = BRAKE;
-			//wait 5ms for motor slow down
-			mTimer(5);
-			//switch to reverse motoring state
-			PORTB = CW;
-		}
-		while((PIND2&0x04) == 0x04){}
-		mTimer(20); //Debounce*/
-	}
+	ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
 }
+
+ISR(INT1_vect) {
+	//end of conveyor belt gate sensor
+	gate_detect = 1;
+}// end ISR1
 
 // the interrupt will be triggered if the ADC is done ========================
 ISR(ADC_vect) {
-	ADC_result = ADCH;//use ADCH when using 8 bit ADC
+	ADCL_result = ADCL; // Read ADCL first
+	ADCH_result = ADCH;//Read ADCH second
+	ADC_result = (ADCH_result << 8) | ADCL_result; //ADCH value in higher 8 bits,  2 useful bits in ADCL in lower 2 bits, total 10 bits
 	ADC_result_flag = 1;
 }
+/*ISR(BADISR_vect){
+ PORTC = 0xB0;
+ mTimer(1000);
+ PORTC = 0xA0;
+ mTimer(1000);
+ PORTC = 0xD0;
+ mTimer(1000);
+}*/
 void turn(int numSteps, int dir)
 {
-	//dir = 0 is ccw
-	//dir = 1 is cw
-	if (dir == 1) {
-		for (int i = 0; i < numSteps; i++) {
-			if (PORTA == step1) {
-				PORTA= step2;
-				mTimer(20);
+	int accelSteps = 7;      // Number of steps for acceleration
+	int decelSteps = 7;      // Number of steps for deceleration
+	int steadySteps = numSteps - 14;     // Number of steps at constant speed
+
+	int minDelay = 5;                   // Minimum delay for maximum speed
+	int maxDelay = 20;                  // Starting delay (for slowest speed)
+	int delay = maxDelay;               // Initial delay for acceleration
+
+	if (dir == STEPPER_CW) {
+		for (int i = 1; i < (numSteps+1); i++) { //i = number of steps taken
+			// Set the port values for each step
+			if (PORTA == STEP1) {
+				PORTA = STEP2;
 			}
-			else if (PORTA == step2) {
-				PORTA= step3;
-				mTimer(20);
+			else if (PORTA == STEP2) {
+				PORTA = STEP3;
 			}
-			else if (PORTA == step3) {
-				PORTA= step4;
-				mTimer(20);
+			else if (PORTA == STEP3) {
+				PORTA = STEP4;
 			}
 			else {
-				PORTA= step1;
-				mTimer(20);
+				PORTA = STEP1;
+			}
+
+			mTimer(delay);  // Wait for the current delay
+
+			// Adjust delay for acceleration
+			if (i < accelSteps) {
+				delay -= (maxDelay - minDelay) / accelSteps;  // Accelerate by reducing delay
+				
+				if (delay < minDelay) {
+					delay = minDelay;       // Cap at minimum delay
+				}
+			} else if (i >= accelSteps + steadySteps) { //start decelerating now
+				delay += (maxDelay - minDelay) / decelSteps;  // Decelerate by increasing delay
+				
+				if (delay > maxDelay) {
+					delay = maxDelay; // Cap at maximum delay
+				}      
+			}
+		}
+	} 
+	else if (dir == STEPPER_CCW) { // Counter-clockwise movement
+		for (int i = 1; i < (numSteps); i++) {
+			// Set the port values for each step in reverse
+			if (PORTA == STEP1) {
+				PORTA = STEP4;
+			}
+			else if (PORTA == STEP4) {
+				PORTA = STEP3;
+			}
+			else if (PORTA == STEP3) {
+				PORTA = STEP2;
+			}
+			else {
+				PORTA = STEP1;
+			}
+
+			mTimer(delay);  // Wait for the current delay
+
+			// Adjust delay for acceleration, steady, and deceleration phases
+			if (i < accelSteps) {
+				delay -= (maxDelay - minDelay) / accelSteps;
+				if (delay < minDelay) {
+					delay = minDelay;
+				}
+			} 
+			else if (i >= accelSteps + steadySteps) {
+				delay += (maxDelay - minDelay) / decelSteps;
+				if (delay > maxDelay) {
+					delay = maxDelay;
+				}
 			}
 		}
 	}
-	else if (dir == 0) {
-		for (int i = 0; i < numSteps; i++) {
-			if (PORTA == step1) {
-				PORTA= step4;
-				mTimer(20);
-			}
-			else if (PORTA == step2) {
-				PORTA= step1;
-				mTimer(20);
-			}
-			else if (PORTA == step3) {
-				PORTA= step2;
-				mTimer(20);
-			}
-			else {
-				PORTA= step3;
-				mTimer(20);
-			}
-		}
-	}
-	mTimer(2000);
+	mTimer(2000); // Pause briefly after each full movement
 }
 
 void mTimer (int count) {
@@ -263,73 +327,63 @@ void PWM () {
 	DDRB |= _BV(PB7); //send PWM signal to PB7
 }
 void bucket(int nextBucket){
-//steper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
-if (currBucket==0)
-{
-	if (nextBucket==1)
-	{
-		turn(50,1)//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==3)
-	{
-		turn(50,0)//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==2)
-	{
-		turn(100,1)//turn 180 degrees cw
-		currBucket=nextBucket;
+	//stepper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
+	if (currBucket==BLACK_BKT) {
+		if (nextBucket==STEEL_BKT) {
+			//stepperDir = STEPPER_CCW;
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==ALUM_BKT) {
+			//stepperDir = STEPPER_CW;
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==WHITE_BKT) {
+			turn(100,STEPPER_CW);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==1)
-{
-	if (nextBucket==2)
-	{
-		turn(50,1) //turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==0)
-	{
-		turn(50,0) //turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==3)
-	{
-		turn(100,1) //turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==STEEL_BKT) {
+		if (nextBucket==WHITE_BKT) {
+			turn(50,STEPPER_CCW); //turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==BLACK_BKT) {
+			turn(50,STEPPER_CW); //turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==ALUM_BKT) {
+			turn(100,STEPPER_CW); //turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==2)
-{
-	if (nextBucket==3)
-	{
-		turn(50,1)//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==1)
-	{
-		turn(50,0)//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==0)
-	{
-		turn(100,1)//turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==WHITE_BKT) {
+		if (nextBucket==ALUM_BKT) {
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==STEEL_BKT) {
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==BLACK_BKT) {
+			turn(100,STEPPER_CW);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-if (currBucket==3)
-{
-	if (nextBucket==0)
-	{
-		turn(50,1)//turn 90 degrees cw
-		currBucket=nextBucket;
-	}else if (nextBucket==2)
-	{
-		turn(50,0)//turn 90 degrees ccw
-		currBucket=nextBucket;
-	}else if (nextBucket==1)
-	{
-		turn(100,1)//turn 180 degrees cw
-		currBucket=nextBucket;
+	else if (currBucket==ALUM_BKT) {
+		if (nextBucket==BLACK_BKT) {
+			turn(50,STEPPER_CCW);//turn 90 degrees ccw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==WHITE_BKT) {
+			turn(50,STEPPER_CW);//turn 90 degrees cw
+			currBucket=nextBucket;
+		}
+		else if (nextBucket==STEEL_BKT) {
+			turn(100,STEPPER_CW);//turn 180 degrees cw
+			currBucket=nextBucket;
+		}
 	}
-	
-}
-	}
+}//end bucket
