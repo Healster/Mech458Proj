@@ -1,0 +1,101 @@
+/*###################################################
+* Lab2
+# MILESTONE:2
+# PROGRAM: 2
+# PROJECT:Lab2 Demo
+# GROUP: 8
+# NAME1: Eric Heal V00866203
+# NAME2: Max Hill V00932966
+# DESC: 
+# DATA
+# REVISED ########################################## */
+
+#include <stdlib.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+void mTimer(int count);
+
+int main(void) {
+	
+	int dir = 0;
+	int i = 0;
+	
+	CLKPR = 0x80; //Set CLKPR register to 128 ie: 1000 0000
+	CLKPR = 0x01; //Required to set CPU clock to 8MHz
+	
+	/*Sets timer 1 to run at 1MHz, CPU clock set to 8MHz.
+	Disables all function and uses timer 1 as pure timer */
+	
+	TCCR1B |= _BV(CS11); /* _BV sets bits to logic 1 
+							TCCR1 is Timer/Counter control register 1
+							B is the 'B' register and 1 is bit 1
+							CS means clock select, with pre-scaler set to 8
+	*/
+	//DDRL = 0b11111111; // sets all pins on PORTL to output
+	DDRC = 0b11111111; // sets all pins on PORTC to output
+	PORTC = 0b11000000; //initialize pins to high to turn on LEDs
+	
+    while (1) {
+		/*PORTL = 0b01000000; //initialize pins to high to turn on LED
+		mTimer(1000);
+		
+		PORTL = 0b00100000;
+		mTimer(1000);
+		*/
+		
+		if (dir == 0 && i < 6) {
+			mTimer(200);
+			PORTC = PORTC >> 1;
+			i++;
+		}
+		else if (i == 6) {
+			mTimer(200);
+			dir = 1;
+			PORTC = PORTC << 1;
+			i--;
+		}
+		else if (dir == 1 && i > 0) {
+			mTimer(200);
+			PORTC = PORTC << 1;
+			i--;
+		}
+		else {
+			mTimer(200);
+			dir = 0;
+			PORTC = PORTC >> 1;
+			i++;
+		}
+	}
+}
+
+void mTimer(int count) {
+	/*System clock is 8MHz. The timer runs on the CPU clock which is a function of the system clock, so using a
+	pre-scaler on the system clock can lower the speed. You can also pre-scale the timer by 1, 8, 64, 256, or 
+	1024 to lower the speed. System clock has been pre-scaled by 2 ie: it's running at half speed, 8MHz.
+	*/
+	
+	int i = 0;
+	
+	//Set Waveform Generation Mode bit description to clear timer on Compare Math Mode (CTC) only
+	TCCR1B |= _BV(WGM12); //Sets WGM bits to 0100
+	
+	OCR1A = 0x03E8; //Set top value of timer, Output Compare Register to 1000 cycles ie: 1ms
+	
+	TCNT1 = 0x0000; // Sets initial value of timer to 0
+	
+	TIMSK1 = TIMSK1 | 0b00000010; //Enable the output compare interrupt enable
+	
+	TIFR1 |= _BV(OCF1A); //Clear interrupt timer flag and begin new timing when reach OCR1A. Clear timer flag by writing a 1 to OCF1A
+							//because it's an interrupt flag and can't modify directly so write a 1 to "reset" function to initiate reset
+	
+	while (i < count) {// while index is less than input value in ms
+		if ((TIFR1 & 0x02) == 0x02) { //if TIFR1 register only has bit OCF1A = 1 ie: 0000 0010
+										//flag is set when timer reaches max value which is 1 thousand
+			TIFR1 |= _BV(OCF1A); //Clear timer interrupt flag by writing a 1 to the bit as above^
+			i++;
+		}
+	}
+	return;
+}
+
