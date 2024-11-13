@@ -7,6 +7,8 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include "lcd.h"
+#include "LinkedQueue.h"
+
  
 // define the global variables that can be used in every function  ==========
 #define BRAKE 0x0F
@@ -29,6 +31,8 @@
 
 volatile unsigned short ADC_result;
 volatile unsigned short ADC_result_old;
+volatile unsigned short ADC_calc;
+volatile unsigned short obj_ADC_meas;
 volatile unsigned char ADCH_result;
 volatile unsigned char ADCL_result;
 volatile unsigned int ADC_result_flag;
@@ -124,7 +128,6 @@ void main(int argc,char*argv[])
 
 	// POLLING STATE
 	POLLING_STAGE:
-	while(1){
 		if (killflag == 1) {
 			cli();
 			LCDClear();
@@ -132,7 +135,6 @@ void main(int argc,char*argv[])
 			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
 		}
 		
-	}
 	switch(STATE){
 		case (0) :
 		goto POLLING_STAGE;
@@ -148,29 +150,41 @@ void main(int argc,char*argv[])
 		default :
 		goto POLLING_STAGE;
 	}//switch STATE
-	
-
-	
 
 	REFLECTIVE_STAGE:
 	// Do whatever is necessary HERE
-	ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
-	if (ADC_result_flag) {
-		//laser has been blocked by something - value stored in ADC_result
-		ADC_result_flag = 0; // clear ADC flag
-		if (ADC_result < 0b1110000100) {
-			PORTL = 0xF0;
+	//ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
+
+	while((PIND&0x04) == 0x04) {//while there is an object in front of laser
+		EIMSK &= ~(_BV(INT2)); // disable INT2
+		ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
+		ADC_calc = (ADC_result + ADC_result_old)/2;
+		if (ADC_result_flag) {//got adc value
+			ADC_result_flag = 0; //clear flag
+			if (ADC_calc > ADC_result){
+				ADC_result_old = ADC_result;
+			}
 		}
-		LCDClear();
-		//here do stuff with adc result: determine item type
-		if (ADC_result_old < ADC_result) {
-			//we have lowest value of ADC reading in ADC_result_old
-			//classify item and input into FIFO
-		}
-		
-		//ADCSRA |= _BV(ADSC);
-		ADC_result_old = ADC_result;//store current ADC result to check with next one
 	}
+	obj_ADC_meas = ADC_result_old;
+	LCDClear();
+	//LCDWriteInt(obj_ADC_meas, 4);
+	if (obj_ADC_meas< 300) {
+			bucket(ALUM_BKT);
+		} 
+		else if (obj_ADC_meas<600 && obj_ADC_meas>400 )
+		{
+			bucket(STEEL_BKT);
+		}
+		else if (obj_ADC_meas>900 && obj_ADC_meas<960)
+		{
+			bucket(WHITE_BKT);
+		}
+		else if (obj_ADC_meas>= 960)
+		{
+			bucket(BLACK_BKT);
+		}
+	EIMSK |= (_BV(INT2)); // re-enable INT2
 	
 		
 	PORTC = 0x04; // Just output pretty lights know you made it here
@@ -204,7 +218,7 @@ void main(int argc,char*argv[])
 	
 //kill button -> switch to pause button later
 
-ISR(INT3_vect)
+ISR(INT3_vect) {
 
 	mTimer(20);
 	
@@ -218,8 +232,10 @@ ISR(INT3_vect)
 //sensor switch: Active HIGH starts AD converstion =======
 ISR(INT2_vect) {
 	// when there is a rising edge, we need to do ADC =====================
-	STATE = 1;
-	
+	ADC_result_flag = 0; //clear adc flag
+	ADCSRA |= _BV(ADSC); //start conversion
+	ADC_result_old = 1024; // set old adc value to highest value
+	STATE = 1; //goto reflective stage
 }
 
 ISR(INT1_vect) {
@@ -229,9 +245,11 @@ ISR(INT1_vect) {
 
 // the interrupt will be triggered if the ADC is done ========================
 ISR(ADC_vect) {
-	ADCL_result = ADCL; // Read ADCL first
-	ADCH_result = ADCH;//Read ADCH second
-	ADC_result = (ADCH_result << 8) | ADCL_result; //ADCH value in higher 8 bits,  2 useful bits in ADCL in lower 2 bits, total 10 bits
+	//ADCL_result = ADCL; // Read ADCL first
+	//ADCH_result = ADCH;//Read ADCH second
+	//ADC_result = (ADCH_result << 8) | ADCL_result; //ADCH value in higher 8 bits,  2 useful bits in ADCL in lower 2 bits, total 10 bits
+	
+	ADC_result = ADC;
 	ADC_result_flag = 1;
 }
 /*ISR(BADISR_vect){
