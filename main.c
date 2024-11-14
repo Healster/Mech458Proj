@@ -17,10 +17,10 @@
 #define CCW 0x0D //forward direction of belt
 
 // define global variables for stepper motor
-#define STEP1 0b00110000
-#define STEP2 0b00000110
-#define STEP3 0b00101000
-#define STEP4 0b00000101
+#define STEP1 0b00110110
+#define STEP2 0b00101110
+#define STEP3 0b00101101
+#define STEP4 0b00110101
 #define STEPPER_CW 1
 #define STEPPER_CCW 0
 
@@ -39,7 +39,8 @@ volatile unsigned char ADCL_result;
 volatile unsigned int ADC_result_flag;
 volatile char STATE;
 
-volatile unsigned int killflag = 0;
+volatile unsigned int pauseflag = 0;
+volatile unsigned int swapflag = 0;
 
 volatile unsigned int gate_detect = 0;
 volatile unsigned int reflect_flag = 0;
@@ -139,16 +140,23 @@ void main(int argc,char*argv[])
 
 	// POLLING STATE
 	POLLING_STAGE:
-		if (killflag == 1) {
-			cli();
-			LCDClear();
-			LCDWriteStringXY(0,1,"PRGRM KILL");
+		if (pauseflag == 1) {
+			swapflag = 0;
 			PORTB = BRAKE; // Set all pins to Hi - brake to Vcc
+			LCDClear();
+			LCDWriteInt((size(&head,&tail)), 1);
+			LCDWriteStringXY(0,1,"PRGRM STOP");
+			
+		}
+		else if (pauseflag == 0 && swapflag == 1) {
+			swapflag = 0;
+			LCDClear();
+			LCDWriteStringXY(0,1,"PRGRM PLAY");
+			PORTB = CCW;
 		}
 		else {
 			PORTB = CCW;
 		}
-		
 		
 	switch(STATE){
 		case (0) :
@@ -183,7 +191,7 @@ void main(int argc,char*argv[])
 	}
 	obj_ADC_meas = ADC_result_old;
 	LCDClear();
-	LCDWriteInt(obj_ADC_meas, 4); // To test for the numbers when using real test objects
+	//LCDWriteInt(obj_ADC_meas, 4); // To test for the numbers when using real test objects
 	if (obj_ADC_meas< 300) {//add Alum to queue
 		initLink(&newLink);
 		newLink->e.itemCode = ALUM_BKT;
@@ -226,13 +234,12 @@ void main(int argc,char*argv[])
 		//stop DC motor
 		PORTB = BRAKE;
 		dequeue(&head, &tail, &rtnLink); //remove first item in queue (save data in rtnLink)
-		//PORTC += rtnLink->e.itemCode << (i*2); //add return link data to PORTC -turns on LEDs
-		//LCDWriteInt(rtnLink->e.itemCode, 1); 
 		//turn to correct bin - output of FIFO
-		LCDWriteIntXY(0, 1, rtnLink->e.itemCode, 1);
+		//LCDWriteIntXY(0, 1, rtnLink->e.itemCode, 1);
 		bucket(rtnLink->e.itemCode);
 		//continue - this will drop item into bin
-		//PORTB = CCW;
+		PORTB = CCW;
+		mTimer(2);
 		free(rtnLink);
 	}
 	PORTC = 0x08;
@@ -246,14 +253,18 @@ void main(int argc,char*argv[])
 	// Stop everything here...'MAKE SAFE'
 } //end main
 	
-//kill button -> switch to pause button later
+//pause button -> switch to pause button later
 
 ISR(INT3_vect) {
 
 	mTimer(20);
-	
-	killflag=1; // disable all interrupts
-	
+	if (pauseflag == 1) {
+		pauseflag=0; //pause = false
+		swapflag = 1;
+	}
+	else if (pauseflag == 0) {
+		pauseflag=1; //pause = true
+	}
 	while((PIND&0x08) == 0x00){}
 	mTimer(20); //Debounce
 
@@ -368,7 +379,6 @@ void turn(int numSteps, int dir)
 			}
 		}
 	}
-	mTimer(100); // Pause briefly after each full movement
 }
 
 void mTimer (int count) {
@@ -426,7 +436,7 @@ void PWM () {
 	TCCR0B |= _BV(CS00);//set to 1
 	TCCR0B |= _BV(CS01);//set to 1
 
-	OCR0A = 0x40; //scale clock to 25% duty cycle
+	OCR0A = 0x66; //scale clock to 50% duty cycle
 
 	DDRB |= _BV(PB7); //send PWM signal to PB7
 }
