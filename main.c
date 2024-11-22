@@ -44,6 +44,8 @@ volatile unsigned int gate_detect = 0;
 volatile unsigned int reflect_flag = 0;
 volatile unsigned int ramp_flag = 0;
 
+volatile unsigned int stepper_ready = 0;
+
 volatile unsigned int countA = 0;
 volatile unsigned int countS = 0;
 volatile unsigned int countB = 0;
@@ -130,9 +132,11 @@ void main(int argc,char*argv[])
 	while((PING&0x02) == 0x02) {
 		turn(1, STEPPER_CCW);
 	}//After this we are homed in on black (bin 0)
-	mTimer(500);
+	mTimer(100);
 	turn(10, STEPPER_CCW);
-	mTimer(500);
+	mTimer(100);
+	stepper_ready = 1;
+	
 	PORTB = CCW;
 	
 	goto POLLING_STAGE;
@@ -163,8 +167,6 @@ void main(int argc,char*argv[])
 	}//switch STATE
 
 	REFLECTIVE_STAGE:
-	// Do whatever is necessary HERE
-	//ADCSRA |= _BV(ADSC); //adc gets started and then adc_vect will be called on completion
 
 	while((PIND&0x04) == 0x04) {//while there is an object in front of laser
 		EIMSK &= ~(_BV(INT2)); // disable INT2
@@ -212,9 +214,11 @@ void main(int argc,char*argv[])
 		//bucket(BLACK_BKT);
 		
 	}
-	/*if (head == newLink) { //if this is first item in queue, turn bucket ahead of time
-		bucket(newLink->e.itemCode);
-	}*/
+	if (stepper_ready == 1) {
+		if (size(&head, &tail) > 0) {
+			bucket(firstValue(&head).itemCode);
+		}
+	}
 	EIMSK |= (_BV(INT2)); // re-enable INT2
 	
 	//Reset the state variable
@@ -230,14 +234,14 @@ void main(int argc,char*argv[])
 	goto POLLING_STAGE;
 	
 	BUCKET_STAGE:
-	// Do whatever is necessary HERE
 	if (gate_detect) {
 		gate_detect = 0; //clear flag
 		//conveyor belt is stopped
-		dequeue(&head, &tail, &rtnLink); //remove first item in queue (save data in rtnLink)
-		mTimer(50); //wait for previous item to hit bin
 		//turn to correct bin - output of FIFO
-		bucket(rtnLink->e.itemCode);
+		if (currBucket != firstValue(&head).itemCode) {
+			bucket(firstValue(&head).itemCode);
+		}
+		dequeue(&head, &tail, &rtnLink);
 		//continue - this will drop item into bin
 		PORTB = CCW;
 		
@@ -356,7 +360,9 @@ ISR(INT2_vect) {
 
 ISR(INT1_vect) {
 	//end of conveyor belt gate sensor
-	PORTB = BRAKE;
+	if (stepper_ready == 0) {
+		PORTB = BRAKE;
+	}
 	gate_detect = 1;
 	STATE = 2;
 }// end ISR1
@@ -542,75 +548,32 @@ void PWM () {
 	TCCR0B |= _BV(CS00);//set to 1
 	TCCR0B |= _BV(CS01);//set to 1
 
-	OCR0A = 0x4F; //66 scale clock to 40% duty cycle
+	OCR0A = 0x64; //decimal 100 scale clock to 100/256 duty cycle
 
 	DDRB |= _BV(PB7); //send PWM signal to PB7
 }
 void bucket(int nextBucket){
-	//stepper motor switcher based on Lab 4a code bucket: 0 = blk, 1= steel, 2 = white, 3 = aluminum
-	//if (currBucket == nextBucket) {
-		//return;
-	//}
 	
-	 if (currBucket==BLACK_BKT) {
-		if (nextBucket==STEEL_BKT) {
-			//stepperDir = STEPPER_CCW;
-			turn(50,STEPPER_CCW);//turn 90 degrees ccw
-			currBucket=nextBucket;
-		}
-	else if (nextBucket==ALUM_BKT) {
-			//stepperDir = STEPPER_CW;
-			turn(50,STEPPER_CW);//turn 90 degrees cw
-			currBucket=nextBucket;
-		}
-	else if (nextBucket==WHITE_BKT) {
-			turn(100,STEPPER_CW);//turn 180 degrees cw
-			currBucket=nextBucket;
-		}
+	if (currBucket == nextBucket) {
+		return;
 	}
-	else if (currBucket==STEEL_BKT) {
-		if (nextBucket==WHITE_BKT) {
-			turn(50,STEPPER_CCW); //turn 90 degrees ccw
-			currBucket=nextBucket;
-		}
-		else if (nextBucket==BLACK_BKT) {
-			turn(50,STEPPER_CW); //turn 90 degrees cw
-			currBucket=nextBucket;
-		}
-		else if (nextBucket==ALUM_BKT) {
-			turn(100,STEPPER_CW); //turn 180 degrees cw
-			currBucket=nextBucket;
-		}
+	
+	stepper_ready = 0;
+	
+	int step_dif = (currBucket-nextBucket + 4) % 4;
+	
+	if (step_dif==2) { //180 degree turn
+		turn(50 * step_dif,STEPPER_CW);//turn 180 degrees cw
 	}
-	else if (currBucket==WHITE_BKT) {
-		if (nextBucket==ALUM_BKT) {
-			turn(50,STEPPER_CCW);//turn 90 degrees ccw
-			currBucket=nextBucket;
-		}
-		else if (nextBucket==STEEL_BKT) {
-			turn(50,STEPPER_CW);//turn 90 degrees cw
-			currBucket=nextBucket;
-		}
-		else if (nextBucket==BLACK_BKT) {
-			turn(100,STEPPER_CW);//turn 180 degrees cw
-			currBucket=nextBucket;
-		}
+	else if (step_dif==3) {
+		turn(50,STEPPER_CCW);//turn 90 degrees cwc
 	}
-	else if (currBucket==ALUM_BKT) {
-		if (nextBucket==BLACK_BKT) {
-			turn(50,STEPPER_CCW);//turn 90 degrees ccw
-			currBucket=nextBucket;
+	else {
+		turn(50,STEPPER_CW);//turn 90 degrees ccw
 		}
-		else if (nextBucket==WHITE_BKT) {
-			turn(50,STEPPER_CW);//turn 90 degrees cw
-			currBucket=nextBucket;
-		}
-		else if (nextBucket==STEEL_BKT) {
-			turn(100,STEPPER_CW);//turn 180 degrees cw
-			currBucket=nextBucket;
-		}
-	}
-	mTimer(50);//wait for bucket to finish turning
+	currBucket = nextBucket;
+	mTimer(100);//wait for bucket to finish turning
+	stepper_ready = 1;
 }//end bucket
 
 /**************************************************************************************
