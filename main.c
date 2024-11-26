@@ -240,8 +240,15 @@ void main(int argc,char*argv[])
 		//turn to correct bin - output of FIFO
 		if (currBucket != firstValue(&head).itemCode) {
 			bucket(firstValue(&head).itemCode);
+			dequeue(&head, &tail, &rtnLink);
 		}
-		dequeue(&head, &tail, &rtnLink);
+		else{
+			 dequeue(&head, &tail, &rtnLink); //remove first item in queue (save data in rtnLink)
+			 mTimer(50); //wait for previous item to hit bin
+			 //turn to correct bin - output of FIFO
+			 bucket(rtnLink->e.itemCode);
+		}
+		
 		//continue - this will drop item into bin
 		PORTB = CCW;
 		
@@ -566,10 +573,10 @@ void bucket(int nextBucket){
 		turn(50 * step_dif,STEPPER_CW);//turn 180 degrees cw
 	}
 	else if (step_dif==3) {
-		turn(50,STEPPER_CCW);//turn 90 degrees cwc
+		turn(50,STEPPER_CW);//turn 90 degrees cw
 	}
 	else {
-		turn(50,STEPPER_CW);//turn 90 degrees ccw
+		turn(50,STEPPER_CCW);//turn 90 degrees ccw
 		}
 	currBucket = nextBucket;
 	mTimer(100);//wait for bucket to finish turning
