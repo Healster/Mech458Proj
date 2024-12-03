@@ -52,10 +52,17 @@ volatile unsigned int countW = 0;
 volatile unsigned int currBucket = BLACK_BKT;
 //volatile unsigned int stepperDir;
 
+volatile link *head; /* The ptr to the head of the queue */
+volatile link *tail; /* The ptr to the tail of the queue */
+volatile link *newLink; /* A ptr to a link aggregate data type (struct) */
+volatile link *rtnLink; /* same as the above */
+volatile element eTest; /* A variable to hold the aggregate data type known as element */
+
+
 void PWM();
 void mTimer(int count); /* included from previous labs */
-void intTimer(int count); //interrupt based timer
-short readADC();
+void intTimer(int count); //second timer
+void add2Q();
 void turn(int numSteps, int dir);
 void bucket(int nextBucket);
 void main(int argc,char*argv[])
@@ -70,11 +77,6 @@ void main(int argc,char*argv[])
 	
 	TCCR3B |= _BV(CS31);
 	
-	link *head; /* The ptr to the head of the queue */
-	link *tail; /* The ptr to the tail of the queue */
-	link *newLink; /* A ptr to a link aggregate data type (struct) */
-	link *rtnLink; /* same as the above */
-	element eTest; /* A variable to hold the aggregate data type known as element */
 	rtnLink = NULL;
 	newLink = NULL;
 	
@@ -406,7 +408,7 @@ ISR(ADC_vect) {
 		}
 	}else{
 		obj_ADC_meas = ADC_result_old;
-		readADC(obj_ADC_meas);
+		add2Q();
 	}
 
 	
@@ -553,11 +555,9 @@ void turn(int numSteps, int dir)
 		}
 	}
 }
-void readADC(obj_ADC_meas){
-	
-
+void add2Q(){
 	//LCDClear();
-	LCDWriteInt(obj_ADC_meas, 4); // To test for the numbers when using real test objects
+	//LCDWriteInt(obj_ADC_meas, 4); // To test for the numbers when using real test objects
 	if (obj_ADC_meas< 300) {//add Alum to queue
 		initLink(&newLink);
 		newLink->e.itemCode = ALUM_BKT;
