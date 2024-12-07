@@ -52,7 +52,7 @@ volatile unsigned int countW = 0;
 
 volatile unsigned int belt_speed = 0x58;
 
-int delay[11] = {20, 19, 19, 18, 17, 16, 14, 12, 10, 8, 6};
+int delay[11] = {14, 14, 13, 12, 11, 10, 9, 8, 7, 6, 6};
 
 volatile unsigned int currBucket = BLACK_BKT;
 //volatile unsigned int stepperDir;
