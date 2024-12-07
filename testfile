@@ -52,7 +52,7 @@ volatile unsigned int countW = 0;
 
 volatile unsigned int belt_speed = 0x58;
 
-int delay[11] = {14, 14, 13, 12, 11, 10, 9, 8, 7, 6, 6};
+int delay[11] = {140, 130, 120, 110, 100, 90, 80, 70, 60, 57, 55};
 
 volatile unsigned int currBucket = BLACK_BKT;
 //volatile unsigned int stepperDir;
@@ -142,18 +142,18 @@ void main(int argc,char*argv[])
 	while((PING&0x02) == 0x02) {
 		turn(1, STEPPER_CCW);
 	}//After this we are homed in on black (bin 0)
-	mTimer(500);
+	mTimer(5000);
 	turn(10, STEPPER_CCW);
-	mTimer(500);
+	mTimer(5000);
 	PORTB = CCW;
 	
 	//stepper test
 	/*bucket(STEEL_BKT);
-	mTimer(500);
+	mTimer(1000);
 	bucket(ALUM_BKT);
-	mTimer(500);
+	mTimer(1000);
 	bucket(BLACK_BKT);
-	mTimer(500);
+	mTimer(1000);
 	bucket(WHITE_BKT);*/
 	
 	goto POLLING_STAGE;
@@ -215,12 +215,12 @@ void main(int argc,char*argv[])
 		newLink->e.itemCode = STEEL_BKT;
 		enqueue(&head, &tail, &newLink);
 	}
-	else if (obj_ADC_meas>650 && obj_ADC_meas<885) { //add white to queue
+	else if (obj_ADC_meas>650 && obj_ADC_meas<877) { //add white to queue
 		initLink(&newLink);
 		newLink->e.itemCode = WHITE_BKT;
 		enqueue(&head, &tail, &newLink);
 	}
-	else if (obj_ADC_meas>=885 && obj_ADC_meas<1024) { //add black to queue
+	else if (obj_ADC_meas>=877 && obj_ADC_meas<1024) { //add black to queue
 		initLink(&newLink);
 		newLink->e.itemCode = BLACK_BKT;
 		enqueue(&head, &tail, &newLink);
@@ -365,7 +365,7 @@ void main(int argc,char*argv[])
 	
 //pause button -> switch to pause button later
 ISR(INT3_vect) {
-	mTimer(25);
+	intTimer(25);
 	if ((PIND&0x08) == 0x00) {
 		if (STATE == 3) {//currently paused
 			STATE = 0; //unpause - polling state
@@ -379,7 +379,7 @@ ISR(INT3_vect) {
 			pauseflag = 1;
 		}
 		while((PIND&0x08) == 0x00){}
-	mTimer(25); //Debounce
+	intTimer(25); //Debounce
 	}
 }//end ISR3
 
@@ -474,19 +474,19 @@ void turn(int numSteps, int dir)
 		for (int i = 0; i < numSteps; i ++) {
 			if (PORTA == STEP1) {
 				PORTA = STEP4;
-				mTimer(20);
+				mTimer(200);
 			}
 			else if (PORTA == STEP4) {
 				PORTA = STEP3;
-				mTimer(20);
+				mTimer(200);
 			}
 			else if (PORTA == STEP3) {
 				PORTA = STEP2;
-				mTimer(20);
+				mTimer(200);
 			}
 			else {
 				PORTA = STEP1;
-				mTimer(20);
+				mTimer(200);
 			}
 		}
 	}
@@ -576,7 +576,7 @@ i = 0; //Initializes loop counter
 TCCR1B |= _BV(WGM12); //Set WGM bits to 0100, see page 145
 //note WGM is spread over two registers
 
-OCR1A = 0x03E8; /* Set output compare register for 1000 cycles= 1ms */
+OCR1A = 0x0064; /* Set output compare register for 100 cycles= 0.1ms */
 
 TCNT1 = 0x0000; /* Initialize Timer1 to zero */
 
